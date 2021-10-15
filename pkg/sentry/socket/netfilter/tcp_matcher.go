@@ -89,6 +89,24 @@ type TCPMatcher struct {
 	destinationPortEnd   uint16
 }
 
+// NewTCPMatcher new TCPMatcher
+func NewTCPMatcher(srcPS, srcPE, dstPS, dstPE uint16) *TCPMatcher {
+	if srcPE == 0 && srcPS == 0 {
+		srcPS = 0
+		srcPE = 1<<16 - 1
+	}
+	if dstPS == 0 && dstPE == 0 {
+		dstPS = 0
+		dstPE = 1<<16 - 1
+	}
+	return &TCPMatcher{
+		sourcePortStart:      srcPS,
+		sourcePortEnd:        srcPE,
+		destinationPortStart: dstPS,
+		destinationPortEnd:   dstPE,
+	}
+}
+
 // name implements matcher.name.
 func (*TCPMatcher) name() string {
 	return matcherNameTCP

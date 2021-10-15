@@ -88,6 +88,24 @@ func DefaultTables(seed uint32, clock tcpip.Clock) *IPTables {
 			},
 			FilterID: {
 				Rules: []Rule{
+					// {
+					// 	Filter: IPHeaderFilter{
+					// 		Protocol:             header.TCPProtocolNumber,
+					// 		CheckProtocol:        true,
+					// 		DstInvert: 			  true,
+					// 		Dst:                  "172.17.0.2",
+					// 		DstMask:              "255.255.255.0",
+
+					// 	},
+					// 	Target: &DropTarget{NetworkProtocol: header.IPv4ProtocolNumber},
+					// 	Matchers: []Matcher{&defaultTcpMatcher{
+					// 		sourcePortStart:      1,
+					// 		sourcePortEnd:        60000,
+					// 		destinationPortStart: 79,
+					// 		destinationPortEnd:   60000,
+					// 	}},
+					// },
+					{Target: &AcceptTarget{NetworkProtocol: header.IPv4ProtocolNumber}},
 					{Target: &AcceptTarget{NetworkProtocol: header.IPv4ProtocolNumber}},
 					{Target: &AcceptTarget{NetworkProtocol: header.IPv4ProtocolNumber}},
 					{Target: &AcceptTarget{NetworkProtocol: header.IPv4ProtocolNumber}},
@@ -392,6 +410,9 @@ func (it *IPTables) check(hook Hook, pkt *PacketBuffer, r *Route, addressEP Addr
 		} else {
 			table = it.v4Tables[tableID]
 		}
+
+		// log.Infof("test input filter table, %v", table.Rules)
+
 		ruleIdx := table.BuiltinChains[hook]
 		switch verdict := it.checkChain(hook, pkt, table, ruleIdx, r, addressEP, inNicName, outNicName); verdict {
 		// If the table returns Accept, move on to the next table.
@@ -583,4 +604,62 @@ func (it *IPTables) OriginalDst(epID TransportEndpointID, netProto tcpip.Network
 		return "", 0, &tcpip.ErrNotConnected{}
 	}
 	return it.connections.originalDst(epID, netProto, transProto)
+}
+
+type defaultTcpMatcher struct {
+	sourcePortStart      uint16
+	sourcePortEnd        uint16
+	destinationPortStart uint16
+	destinationPortEnd   uint16
+}
+
+func (*defaultTcpMatcher) name() string {
+	return "tcp"
+}
+
+func (tm *defaultTcpMatcher) Match(hook Hook, pkt *PacketBuffer, _, _ string) (matches bool, hotdrop bool) {
+	// log.Infof("begin to test match: %v, pkt: %v", hook, pkt)
+	switch pkt.NetworkProtocolNumber {
+	case header.IPv4ProtocolNumber:
+		netHeader := header.IPv4(pkt.NetworkHeader().View())
+		if netHeader.TransportProtocol() != header.TCPProtocolNumber {
+			return false, false
+		}
+
+		// We don't match fragments.
+		if frag := netHeader.FragmentOffset(); frag != 0 {
+			if frag == 1 {
+				return false, true
+			}
+			return false, false
+		}
+
+	case header.IPv6ProtocolNumber:
+		// As in Linux, we do not perform an IPv6 fragment check. See
+		// xt_action_param.fragoff in
+		// include/linux/netfilter/x_tables.h.
+		if header.IPv6(pkt.NetworkHeader().View()).TransportProtocol() != header.TCPProtocolNumber {
+			return false, false
+		}
+
+	default:
+		// We don't know the network protocol.
+		return false, false
+	}
+
+	tcpHeader := header.TCP(pkt.TransportHeader().View())
+	if len(tcpHeader) < header.TCPMinimumSize {
+		// There's no valid TCP header here, so we drop the packet immediately.
+		return false, true
+	}
+
+	// Check whether the source and destination ports are within the
+	// matching range.
+	if sourcePort := tcpHeader.SourcePort(); sourcePort < tm.sourcePortStart || tm.sourcePortEnd < sourcePort {
+		return false, false
+	}
+	if destinationPort := tcpHeader.DestinationPort(); destinationPort < tm.destinationPortStart || tm.destinationPortEnd < destinationPort {
+		return false, false
+	}
+	return true, false
 }

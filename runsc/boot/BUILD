@@ -104,6 +104,7 @@ go_library(
         "//pkg/tcpip/link/loopback",
         "//pkg/tcpip/link/qdisc/fifo",
         "//pkg/tcpip/link/sniffer",
+        "//pkg/tcpip/header",
         "//pkg/tcpip/network/arp",
         "//pkg/tcpip/network/ipv4",
         "//pkg/tcpip/network/ipv6",

@@ -14,7 +14,10 @@ go_binary(
         "//visibility:public",
     ],
     x_defs = {"main.version": "{STABLE_VERSION}"},
-    deps = ["//runsc/cli"],
+    deps = [
+        "//runsc/cli",
+        "//pkg/log"
+        ],
 )
 
 # The runsc-race target is a race-compatible BUILD target. This must be built

@@ -86,6 +86,9 @@ const (
 	// NetworkCreateLinksAndRoutes creates links and routes in a network stack.
 	NetworkCreateLinksAndRoutes = "Network.CreateLinksAndRoutes"
 
+	// NetworkReplaceIptables replace a iptables in a network stack.
+	NetworkReplaceIptables = "Network.ReplaceIPTables"
+
 	// DebugStacks collects sandbox stacks for debugging.
 	DebugStacks = "debug.Stacks"
 )

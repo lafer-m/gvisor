@@ -22,7 +22,9 @@ import (
 
 	"golang.org/x/sys/unix"
 	"gvisor.dev/gvisor/pkg/log"
+	"gvisor.dev/gvisor/pkg/sentry/socket/netfilter"
 	"gvisor.dev/gvisor/pkg/tcpip"
+	"gvisor.dev/gvisor/pkg/tcpip/header"
 	"gvisor.dev/gvisor/pkg/tcpip/link/ethernet"
 	"gvisor.dev/gvisor/pkg/tcpip/link/fdbased"
 	"gvisor.dev/gvisor/pkg/tcpip/link/loopback"
@@ -151,6 +153,212 @@ func (r *Route) toTcpipRoute(id tcpip.NICID) (tcpip.Route, error) {
 		Gateway:     ipToAddress(r.Gateway),
 		NIC:         id,
 	}, nil
+}
+
+type Action string
+
+const (
+	Drop   Action = "drop"
+	Accept        = "accept"
+	Reject        = "reject"
+)
+
+// ReplaceIPTableArg
+type ReplaceIPTableArg struct {
+	// only support filter table for now
+	Table string `json:"table"`
+
+	InputRules  Rules `json:"input_rules"`
+	OutputRules Rules `json:"output_rules"`
+}
+
+type Rules struct {
+	DefaultDrop bool   `json:"default_drop"`
+	Rules       []Rule `json:"rules"`
+}
+
+type Rule struct {
+	// only support tcp for now
+	Protocol     string `json:"protocol"`
+	Action       Action `json:"action"`
+	Dst          string `json:"dst"`
+	DstMask      string `json:"dst_mask"`
+	Src          string `json:"src"`
+	SrcMask      string `json:"src_mask"`
+	SrcPortStart uint16 `json:"src_port_start"`
+	SrcPortEnd   uint16 `json:"src_port_end"`
+	DstPortStart uint16 `json:"dst_port_start"`
+	DstPortEnd   uint16 `json:"dst_port_end"`
+}
+
+// ReplaceIPTables replace iptables in a network stack. It expose to runsc cmd
+// Only support ipv4 and filter tables for test demo for now.
+// Example Table:
+// FilterID: {
+// 	Rules: []Rule{
+// 		{
+// 			Filter: IPHeaderFilter{
+// 				Protocol:             header.TCPProtocolNumber,
+// 				CheckProtocol:        true,
+// 				DstInvert: 			  true,
+// 				Dst:                  "172.17.0.2",
+// 				DstMask:              "255.255.255.0",
+
+// 			},
+// 			Target: &DropTarget{NetworkProtocol: header.IPv4ProtocolNumber},
+// 			Matchers: []Matcher{&defaultTcpMatcher{
+// 				sourcePortStart:      1,
+// 				sourcePortEnd:        60000,
+// 				destinationPortStart: 79,
+// 				destinationPortEnd:   60000,
+// 			}},
+// 		},
+// 		{Target: &AcceptTarget{NetworkProtocol: header.IPv4ProtocolNumber}},
+// 		{Target: &AcceptTarget{NetworkProtocol: header.IPv4ProtocolNumber}},
+// 		{Target: &AcceptTarget{NetworkProtocol: header.IPv4ProtocolNumber}},
+// 		{Target: &AcceptTarget{NetworkProtocol: header.IPv4ProtocolNumber}},
+// 		{Target: &ErrorTarget{NetworkProtocol: header.IPv4ProtocolNumber}},
+// 	},
+// 	BuiltinChains: [NumHooks]int{
+// 		Prerouting:  HookUnset,
+// 		Input:       0,
+// 		Forward:     1,
+// 		Output:      2,
+// 		Postrouting: HookUnset,
+// 	},
+// 	Underflows: [NumHooks]int{
+// 		Prerouting:  HookUnset,
+// 		Input:       0,
+// 		Forward:     1,
+// 		Output:      2,
+// 		Postrouting: HookUnset,
+// 	},
+// }
+func (n *Network) ReplaceIPTables(args *ReplaceIPTableArg, _ *struct{}) error {
+	log.Infof("start to replace filter iptables")
+	if args.Table != "filter" {
+		return fmt.Errorf("only support filter table , not support %s table", args.Table)
+	}
+	log.Infof("replace tables %v", args.InputRules)
+
+	rules := []stack.Rule{}
+	defaultInputRule := stack.Rule{Target: &stack.AcceptTarget{NetworkProtocol: header.IPv4ProtocolNumber}}
+	defaultOutputRule := stack.Rule{Target: &stack.AcceptTarget{NetworkProtocol: header.IPv4ProtocolNumber}}
+	if args.InputRules.DefaultDrop {
+		defaultInputRule = stack.Rule{Target: &stack.DropTarget{NetworkProtocol: header.IPv4ProtocolNumber}}
+	}
+	if args.OutputRules.DefaultDrop {
+		defaultOutputRule = stack.Rule{Target: &stack.DropTarget{NetworkProtocol: header.IPv4ProtocolNumber}}
+	}
+	inputStartIndex := 0
+	for _, rule := range args.InputRules.Rules {
+		srcInvert, dstInvert := true, true
+		if rule.Src == "" {
+			srcInvert = false
+		}
+		if rule.Dst == "" {
+			dstInvert = false
+		}
+		var target stack.Target
+		switch rule.Action {
+		case Drop:
+			target = &stack.DropTarget{NetworkProtocol: header.IPv4ProtocolNumber}
+		case Accept:
+			target = &stack.AcceptTarget{NetworkProtocol: header.IPv4ProtocolNumber}
+		case Reject:
+			target = &stack.ReturnTarget{NetworkProtocol: header.IPv4ProtocolNumber}
+		default:
+			return fmt.Errorf("not supported target %s", target)
+		}
+
+		r := stack.Rule{
+			Filter: stack.IPHeaderFilter{
+				Protocol:      header.TCPProtocolNumber,
+				CheckProtocol: true,
+				SrcInvert:     srcInvert,
+				Src:           tcpip.Address(rule.Src),
+				SrcMask:       tcpip.Address(rule.SrcMask),
+				DstInvert:     dstInvert,
+				Dst:           tcpip.Address(rule.Dst),
+				DstMask:       tcpip.Address(rule.DstMask),
+			},
+			Target:   target,
+			Matchers: []stack.Matcher{netfilter.NewTCPMatcher(rule.SrcPortStart, rule.SrcPortEnd, rule.DstPortStart, rule.DstPortEnd)},
+		}
+		rules = append(rules, r)
+	}
+	// add default rule
+	rules = append(rules, defaultInputRule)
+	// add forward default rule
+	rules = append(rules, stack.Rule{Target: &stack.AcceptTarget{NetworkProtocol: header.IPv4ProtocolNumber}})
+	forwardStartIndex := len(rules) - 1
+	outputStartIndex := forwardStartIndex + 1
+	for _, rule := range args.OutputRules.Rules {
+		srcInvert, dstInvert := true, true
+		if rule.Src == "" {
+			srcInvert = false
+		}
+		if rule.Dst == "" {
+			dstInvert = false
+		}
+		var target stack.Target
+		switch rule.Action {
+		case Drop:
+			target = &stack.DropTarget{NetworkProtocol: header.IPv4ProtocolNumber}
+		case Accept:
+			target = &stack.AcceptTarget{NetworkProtocol: header.IPv4ProtocolNumber}
+		case Reject:
+			target = &stack.ReturnTarget{NetworkProtocol: header.IPv4ProtocolNumber}
+		default:
+			return fmt.Errorf("not supported target %s", target)
+		}
+
+		r := stack.Rule{
+			Filter: stack.IPHeaderFilter{
+				Protocol:      header.TCPProtocolNumber,
+				CheckProtocol: true,
+				SrcInvert:     srcInvert,
+				Src:           tcpip.Address(rule.Src),
+				SrcMask:       tcpip.Address(rule.SrcMask),
+				DstInvert:     dstInvert,
+				Dst:           tcpip.Address(rule.Dst),
+				DstMask:       tcpip.Address(rule.DstMask),
+			},
+			Target:   target,
+			Matchers: []stack.Matcher{netfilter.NewTCPMatcher(rule.SrcPortStart, rule.SrcPortEnd, rule.DstPortStart, rule.DstPortEnd)},
+		}
+		rules = append(rules, r)
+	}
+
+	// add default rule
+	rules = append(rules, defaultOutputRule)
+	rules = append(rules, stack.Rule{Target: &stack.ErrorTarget{NetworkProtocol: header.IPv4ProtocolNumber}})
+
+	table := stack.Table{
+		Rules: rules,
+		BuiltinChains: [stack.NumHooks]int{
+			stack.Prerouting:  stack.HookUnset,
+			stack.Input:       inputStartIndex,
+			stack.Forward:     forwardStartIndex,
+			stack.Output:      outputStartIndex,
+			stack.Postrouting: stack.HookUnset,
+		},
+		Underflows: [stack.NumHooks]int{
+			stack.Prerouting:  stack.HookUnset,
+			stack.Input:       inputStartIndex,
+			stack.Forward:     forwardStartIndex,
+			stack.Output:      outputStartIndex,
+			stack.Postrouting: stack.HookUnset,
+		},
+	}
+
+	log.Infof("new tables is %v", table)
+	for _, r := range rules {
+		log.Infof("rule %v", r)
+	}
+	n.Stack.IPTables().ReplaceTable(stack.FilterID, table, false)
+	log.Infof("replace stack iptables success!")
+	return nil
 }
 
 // CreateLinksAndRoutes creates links and routes in a network stack.  It should

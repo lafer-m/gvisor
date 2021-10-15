@@ -1133,6 +1133,7 @@ func newEmptySandboxNetworkStack(clock tcpip.Clock, uniqueID stack.UniqueID, all
 		icmp.NewProtocol4,
 		icmp.NewProtocol6,
 	}
+
 	s := netstack.Stack{Stack: stack.New(stack.Options{
 		NetworkProtocols:   netProtos,
 		TransportProtocols: transProtos,
