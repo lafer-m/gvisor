@@ -682,11 +682,12 @@ func (c *Container) Stream(filters []string, out *os.File) error {
 // State returns the metadata of the container.
 func (c *Container) State() specs.State {
 	return specs.State{
-		Version: specs.Version,
-		ID:      c.ID,
-		Status:  c.Status.String(),
-		Pid:     c.SandboxPid(),
-		Bundle:  c.BundleDir,
+		Version:     specs.Version,
+		ID:          c.ID,
+		Status:      c.Status.String(),
+		Pid:         c.SandboxPid(),
+		Bundle:      c.BundleDir,
+		Annotations: c.Spec.Annotations,
 	}
 }
 
