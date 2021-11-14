@@ -86,6 +86,24 @@ type UDPMatcher struct {
 	destinationPortEnd   uint16
 }
 
+// NewTCPMatcher new TCPMatcher
+func NewUDPMatcher(srcPS, srcPE, dstPS, dstPE uint16) *UDPMatcher {
+	if srcPE == 0 && srcPS == 0 {
+		srcPS = 0
+		srcPE = 1<<16 - 1
+	}
+	if dstPS == 0 && dstPE == 0 {
+		dstPS = 0
+		dstPE = 1<<16 - 1
+	}
+	return &UDPMatcher{
+		sourcePortStart:      srcPS,
+		sourcePortEnd:        srcPE,
+		destinationPortStart: dstPS,
+		destinationPortEnd:   dstPE,
+	}
+}
+
 // name implements Matcher.name.
 func (*UDPMatcher) name() string {
 	return matcherNameUDP

@@ -178,7 +178,7 @@ type Rules struct {
 }
 
 type Rule struct {
-	// only support tcp for now
+	// only support tcp/udp for now
 	Protocol     string `json:"protocol"`
 	Action       Action `json:"action"`
 	Dst          string `json:"dst"`
@@ -271,9 +271,19 @@ func (n *Network) ReplaceIPTables(args *ReplaceIPTableArg, _ *struct{}) error {
 			return fmt.Errorf("not supported target %s", target)
 		}
 
+		protol := header.TCPProtocolNumber
+		var matcher stack.Matcher = netfilter.NewTCPMatcher(rule.SrcPortStart, rule.SrcPortEnd, rule.DstPortStart, rule.DstPortEnd)
+		if rule.Protocol == "udp" {
+			protol = header.UDPProtocolNumber
+			matcher = netfilter.NewUDPMatcher(rule.SrcPortStart, rule.SrcPortEnd, rule.DstPortStart, rule.DstPortEnd)
+		} else if rule.Protocol != "tcp" {
+			log.Warningf("not supported protocol")
+			continue
+		}
+
 		r := stack.Rule{
 			Filter: stack.IPHeaderFilter{
-				Protocol:      header.TCPProtocolNumber,
+				Protocol:      protol,
 				CheckProtocol: true,
 				SrcInvert:     srcInvert,
 				Src:           tcpip.Address(rule.Src),
@@ -283,7 +293,7 @@ func (n *Network) ReplaceIPTables(args *ReplaceIPTableArg, _ *struct{}) error {
 				DstMask:       tcpip.Address(rule.DstMask),
 			},
 			Target:   target,
-			Matchers: []stack.Matcher{netfilter.NewTCPMatcher(rule.SrcPortStart, rule.SrcPortEnd, rule.DstPortStart, rule.DstPortEnd)},
+			Matchers: []stack.Matcher{matcher},
 		}
 		rules = append(rules, r)
 	}
@@ -313,9 +323,19 @@ func (n *Network) ReplaceIPTables(args *ReplaceIPTableArg, _ *struct{}) error {
 			return fmt.Errorf("not supported target %s", target)
 		}
 
+		protol := header.TCPProtocolNumber
+		var matcher stack.Matcher = netfilter.NewTCPMatcher(rule.SrcPortStart, rule.SrcPortEnd, rule.DstPortStart, rule.DstPortEnd)
+		if rule.Protocol == "udp" {
+			protol = header.UDPProtocolNumber
+			matcher = netfilter.NewUDPMatcher(rule.SrcPortStart, rule.SrcPortEnd, rule.DstPortStart, rule.DstPortEnd)
+		} else if rule.Protocol != "tcp" {
+			log.Warningf("not supported protocol")
+			continue
+		}
+
 		r := stack.Rule{
 			Filter: stack.IPHeaderFilter{
-				Protocol:      header.TCPProtocolNumber,
+				Protocol:      protol,
 				CheckProtocol: true,
 				SrcInvert:     srcInvert,
 				Src:           tcpip.Address(rule.Src),
@@ -325,7 +345,7 @@ func (n *Network) ReplaceIPTables(args *ReplaceIPTableArg, _ *struct{}) error {
 				DstMask:       tcpip.Address(rule.DstMask),
 			},
 			Target:   target,
-			Matchers: []stack.Matcher{netfilter.NewTCPMatcher(rule.SrcPortStart, rule.SrcPortEnd, rule.DstPortStart, rule.DstPortEnd)},
+			Matchers: []stack.Matcher{matcher},
 		}
 		rules = append(rules, r)
 	}
@@ -352,10 +372,10 @@ func (n *Network) ReplaceIPTables(args *ReplaceIPTableArg, _ *struct{}) error {
 		},
 	}
 
-	log.Infof("new tables is %v", table)
-	for _, r := range rules {
-		log.Infof("rule %v", r)
-	}
+	// log.Infof("new tables is %v", table)
+	// for _, r := range rules {
+	// 	log.Infof("rule %v", r)
+	// }
 	n.Stack.IPTables().ReplaceTable(stack.FilterID, table, false)
 	log.Infof("replace stack iptables success!")
 	return nil
