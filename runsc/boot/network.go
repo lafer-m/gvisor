@@ -252,13 +252,13 @@ func (n *Network) ReplaceIPTables(args *ReplaceIPTableArg, _ *struct{}) error {
 	}
 	inputStartIndex := 0
 	for _, rule := range args.InputRules.Rules {
-		srcInvert, dstInvert := true, true
-		if rule.Src == "" {
-			srcInvert = false
-		}
-		if rule.Dst == "" {
-			dstInvert = false
-		}
+		// srcInvert, dstInvert := true, true
+		// if rule.Src == "" {
+		// 	srcInvert = false
+		// }
+		// if rule.Dst == "" {
+		// 	dstInvert = false
+		// }
 		var target stack.Target
 		switch rule.Action {
 		case Drop:
@@ -281,16 +281,22 @@ func (n *Network) ReplaceIPTables(args *ReplaceIPTableArg, _ *struct{}) error {
 			continue
 		}
 
+		var src, srcMask, dst, dstMask tcpip.Address
+		src = tcpip.Address(parseIPv4(rule.Src))
+		srcMask = tcpip.Address(parseIPv4(rule.SrcMask))
+		dst = tcpip.Address(parseIPv4(rule.Dst))
+		dstMask = tcpip.Address(parseIPv4(rule.DstMask))
+
 		r := stack.Rule{
 			Filter: stack.IPHeaderFilter{
 				Protocol:      protol,
 				CheckProtocol: true,
-				SrcInvert:     srcInvert,
-				Src:           tcpip.Address(rule.Src),
-				SrcMask:       tcpip.Address(rule.SrcMask),
-				DstInvert:     dstInvert,
-				Dst:           tcpip.Address(rule.Dst),
-				DstMask:       tcpip.Address(rule.DstMask),
+				// SrcInvert:     srcInvert,
+				Src:     src,
+				SrcMask: srcMask,
+				// DstInvert: dstInvert,
+				Dst:     dst,
+				DstMask: dstMask,
 			},
 			Target:   target,
 			Matchers: []stack.Matcher{matcher},
@@ -304,13 +310,13 @@ func (n *Network) ReplaceIPTables(args *ReplaceIPTableArg, _ *struct{}) error {
 	forwardStartIndex := len(rules) - 1
 	outputStartIndex := forwardStartIndex + 1
 	for _, rule := range args.OutputRules.Rules {
-		srcInvert, dstInvert := true, true
-		if rule.Src == "" {
-			srcInvert = false
-		}
-		if rule.Dst == "" {
-			dstInvert = false
-		}
+		// srcInvert, dstInvert := true, true
+		// if rule.Src == "" {
+		// 	srcInvert = false
+		// }
+		// if rule.Dst == "" {
+		// 	dstInvert = false
+		// }
 		var target stack.Target
 		switch rule.Action {
 		case Drop:
@@ -333,16 +339,22 @@ func (n *Network) ReplaceIPTables(args *ReplaceIPTableArg, _ *struct{}) error {
 			continue
 		}
 
+		var src, srcMask, dst, dstMask tcpip.Address
+		src = tcpip.Address(parseIPv4(rule.Src))
+		srcMask = tcpip.Address(parseIPv4(rule.SrcMask))
+		dst = tcpip.Address(parseIPv4(rule.Dst))
+		dstMask = tcpip.Address(parseIPv4(rule.DstMask))
+
 		r := stack.Rule{
 			Filter: stack.IPHeaderFilter{
 				Protocol:      protol,
 				CheckProtocol: true,
-				SrcInvert:     srcInvert,
-				Src:           tcpip.Address(rule.Src),
-				SrcMask:       tcpip.Address(rule.SrcMask),
-				DstInvert:     dstInvert,
-				Dst:           tcpip.Address(rule.Dst),
-				DstMask:       tcpip.Address(rule.DstMask),
+				// SrcInvert:     srcInvert,
+				Src:     src,
+				SrcMask: srcMask,
+				// DstInvert: dstInvert,
+				Dst:     dst,
+				DstMask: dstMask,
 			},
 			Target:   target,
 			Matchers: []stack.Matcher{matcher},
@@ -379,6 +391,50 @@ func (n *Network) ReplaceIPTables(args *ReplaceIPTableArg, _ *struct{}) error {
 	n.Stack.IPTables().ReplaceTable(stack.FilterID, table, false)
 	log.Infof("replace stack iptables success!")
 	return nil
+}
+
+func parseIPv4(s string) []byte {
+	var p [4]byte
+	for i := 0; i < 4; i++ {
+		if len(s) == 0 {
+			// Missing octets
+			return nil
+		}
+		if i > 0 {
+			if s[0] != '.' {
+				return nil
+			}
+			s = s[1:]
+		}
+		n, c, ok := dtoi(s)
+		if !ok || n > 0xFF {
+			return nil
+		}
+		s = s[c:]
+		p[i] = byte(n)
+	}
+	if len(s) != 0 {
+		return nil
+	}
+	return p[:]
+}
+
+// Decimal to integer.
+// Returns number, characters consumed, success.
+const big = 0xFFFFFF
+
+func dtoi(s string) (n int, i int, ok bool) {
+	n = 0
+	for i = 0; i < len(s) && '0' <= s[i] && s[i] <= '9'; i++ {
+		n = n*10 + int(s[i]-'0')
+		if n >= big {
+			return big, i, false
+		}
+	}
+	if i == 0 {
+		return 0, 0, false
+	}
+	return n, i, true
 }
 
 // CreateLinksAndRoutes creates links and routes in a network stack.  It should

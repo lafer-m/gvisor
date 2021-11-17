@@ -309,7 +309,6 @@ func (it *IPTables) CheckPrerouting(pkt *PacketBuffer, addressEP AddressableEndp
 // Precondition: The packet's network and transport header must be set.
 func (it *IPTables) CheckInput(pkt *PacketBuffer, inNicName string) bool {
 	const hook = Input
-
 	if it.shouldSkip(pkt.NetworkProtocolNumber) {
 		return true
 	}
@@ -410,8 +409,6 @@ func (it *IPTables) check(hook Hook, pkt *PacketBuffer, r *Route, addressEP Addr
 		} else {
 			table = it.v4Tables[tableID]
 		}
-
-		// log.Infof("test input filter table, %v", table.Rules)
 
 		ruleIdx := table.BuiltinChains[hook]
 		switch verdict := it.checkChain(hook, pkt, table, ruleIdx, r, addressEP, inNicName, outNicName); verdict {

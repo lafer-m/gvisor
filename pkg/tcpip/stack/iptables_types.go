@@ -273,8 +273,8 @@ func (fl IPHeaderFilter) match(pkt *PacketBuffer, hook Hook, inNicName, outNicNa
 	}
 
 	// Check the addresses.
-	// log.Infof("test filter address dst: %v, dstMask: %v, flDst: %v, flDstInvert: %v", dstAddr, fl.DstMask, fl.Dst, fl.DstInvert)
-	// log.Infof("test filter address src: %v, srcMask: %v, flSrc: %v, flSrcInvert: %v", srcAddr, fl.SrcMask, fl.Src, fl.SrcInvert)
+	// log.Infof("test filter address dst: %v, dstMask: %v, flDst: %v, flDstInvert: %v", dstAddr.String(), fl.DstMask.String(), fl.Dst.String(), fl.DstInvert)
+	// log.Infof("test filter address src: %v, srcMask: %v, flSrc: %v, flSrcInvert: %v", srcAddr.String(), fl.SrcMask.String(), fl.Src.String(), fl.SrcInvert)
 	if !filterAddress(dstAddr, fl.DstMask, fl.Dst, fl.DstInvert) ||
 		!filterAddress(srcAddr, fl.SrcMask, fl.Src, fl.SrcInvert) {
 		return false
