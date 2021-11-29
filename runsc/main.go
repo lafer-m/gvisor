@@ -16,11 +16,10 @@
 package main
 
 import (
-	"gvisor.dev/gvisor/pkg/log"
 	"gvisor.dev/gvisor/runsc/cli"
 )
 
 func main() {
-	log.Infof("now i can dev gvisor version: %s", version)
+	// log.Infof("now i can dev gvisor version: %s", version)
 	cli.Main(version)
 }
