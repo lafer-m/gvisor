@@ -938,12 +938,20 @@ func (e *endpoint) handleValidatedPacket(h header.IPv4, pkt *stack.PacketBuffer,
 		return
 	}
 
-	// iptables filtering. All packets that reach here are intended for
-	// this machine and will not be forwarded.
-	if ok := e.protocol.stack.IPTables().CheckInput(pkt, inNICName); !ok {
-		// iptables is telling us to drop the packet.
-		stats.ip.IPTablesInputDropped.Increment()
-		return
+	// get the icmp or tcpreset router for iptables.CheckInput
+	{
+		origIPHdr := header.IPv4(pkt.NetworkHeader().View())
+		origIPHdrSrc := origIPHdr.SourceAddress()
+		origIPHdrDst := origIPHdr.DestinationAddress()
+		router, _ := e.protocol.stack.FindRoute(e.nic.ID(), origIPHdrDst, origIPHdrSrc, ProtocolNumber, false)
+		defer router.Release()
+		// iptables filtering. All packets that reach here are intended for
+		// this machine and will not be forwarded.
+		if ok := e.protocol.stack.IPTables().CheckInput(pkt, router, inNICName); !ok {
+			// iptables is telling us to drop the packet.
+			stats.ip.IPTablesInputDropped.Increment()
+			return
+		}
 	}
 
 	if h.More() || h.FragmentOffset() != 0 {

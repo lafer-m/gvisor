@@ -307,13 +307,13 @@ func (it *IPTables) CheckPrerouting(pkt *PacketBuffer, addressEP AddressableEndp
 // must be dropped if false is returned.
 //
 // Precondition: The packet's network and transport header must be set.
-func (it *IPTables) CheckInput(pkt *PacketBuffer, inNicName string) bool {
+func (it *IPTables) CheckInput(pkt *PacketBuffer, r *Route, inNicName string) bool {
 	const hook = Input
 	if it.shouldSkip(pkt.NetworkProtocolNumber) {
 		return true
 	}
 
-	ret := it.check(hook, pkt, nil /* route */, nil /* addressEP */, inNicName, "" /* outNicName */)
+	ret := it.check(hook, pkt, r /* route */, nil /* addressEP */, inNicName, "" /* outNicName */)
 	if t := pkt.tuple; t != nil {
 		t.conn.finalize()
 	}

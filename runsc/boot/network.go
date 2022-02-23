@@ -266,7 +266,7 @@ func (n *Network) ReplaceIPTables(args *ReplaceIPTableArg, _ *struct{}) error {
 		case Accept:
 			target = &stack.AcceptTarget{NetworkProtocol: header.IPv4ProtocolNumber}
 		case Reject:
-			target = &stack.ReturnTarget{NetworkProtocol: header.IPv4ProtocolNumber}
+			target = &stack.RejectICMPTarget{NetworkProtocol: header.IPv4ProtocolNumber}
 		default:
 			return fmt.Errorf("not supported target %s", target)
 		}

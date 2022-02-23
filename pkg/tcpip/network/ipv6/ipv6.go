@@ -1181,13 +1181,28 @@ func (e *endpoint) handleValidatedPacket(h header.IPv6, pkt *stack.PacketBuffer,
 		return
 	}
 
+	// get the icmp or tcpreset router for iptables.CheckInput
+	{
+		origIPHdr := header.IPv4(pkt.NetworkHeader().View())
+		origIPHdrSrc := origIPHdr.SourceAddress()
+		origIPHdrDst := origIPHdr.DestinationAddress()
+		router, _ := e.protocol.stack.FindRoute(e.nic.ID(), origIPHdrDst, origIPHdrSrc, ProtocolNumber, false)
+		defer router.Release()
+		// iptables filtering. All packets that reach here are intended for
+		// this machine and will not be forwarded.
+		if ok := e.protocol.stack.IPTables().CheckInput(pkt, router, inNICName); !ok {
+			// iptables is telling us to drop the packet.
+			stats.IPTablesInputDropped.Increment()
+			return
+		}
+	}
 	// iptables filtering. All packets that reach here are intended for
 	// this machine and need not be forwarded.
-	if ok := e.protocol.stack.IPTables().CheckInput(pkt, inNICName); !ok {
-		// iptables is telling us to drop the packet.
-		stats.IPTablesInputDropped.Increment()
-		return
-	}
+	// if ok := e.protocol.stack.IPTables().CheckInput(pkt, e.nic, inNICName); !ok {
+	// 	// iptables is telling us to drop the packet.
+	// 	stats.IPTablesInputDropped.Increment()
+	// 	return
+	// }
 
 	// Any returned error is only useful for terminating execution early, but
 	// we have nothing left to do, so we can drop it.

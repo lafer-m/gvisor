@@ -19,6 +19,7 @@ import (
 
 	"gvisor.dev/gvisor/pkg/log"
 	"gvisor.dev/gvisor/pkg/tcpip"
+	"gvisor.dev/gvisor/pkg/tcpip/buffer"
 	"gvisor.dev/gvisor/pkg/tcpip/header"
 )
 
@@ -69,6 +70,97 @@ type UserChainTarget struct {
 // Action implements Target.Action.
 func (*UserChainTarget) Action(*PacketBuffer, Hook, *Route, AddressableEndpoint) (RuleVerdict, int) {
 	panic("UserChainTarget should never be called.")
+}
+
+// RejectICMPTarget return icmp port unreachable, only support ipv4
+type RejectICMPTarget struct {
+	// NetworkProtocol is the network protocol the target is used with.
+	//
+	// Immutable.
+	NetworkProtocol tcpip.NetworkProtocolNumber
+}
+
+func (rt *RejectICMPTarget) Action(pkt *PacketBuffer, hook Hook, r *Route, addressEP AddressableEndpoint) (RuleVerdict, int) {
+	// should return icmp err
+	if rt.NetworkProtocol != pkt.NetworkProtocolNumber {
+		// not support protocol
+		panic(fmt.Sprintf(
+			"RejectICMPTarget.Action with NetworkProtocol %d called on packet with NetworkProtocolNumber %d",
+			rt.NetworkProtocol, pkt.NetworkProtocolNumber))
+	}
+
+	// just jrop without return icmp error
+	if r == nil {
+		return RuleDrop, 0
+	}
+
+	// return icmp port unreachable err
+	origIPHdr := header.IPv4(pkt.NetworkHeader().View())
+	origIPHdrSrc := origIPHdr.SourceAddress()
+	origIPHdrDst := origIPHdr.DestinationAddress()
+
+	if pkt.NetworkPacketInfo.LocalAddressBroadcast || header.IsV4MulticastAddress(origIPHdrDst) || origIPHdrSrc == header.IPv4Any {
+		return RuleDrop, 0
+	}
+
+	// only support ipv4
+	if pkt.NetworkProtocolNumber != header.IPv4ProtocolNumber {
+		return RuleDrop, 0
+	}
+
+	icmpType, icmpCode := header.ICMPv4DstUnreachable, header.ICMPv4PortUnreachable
+	transportHeader := pkt.TransportHeader().View()
+
+	mtu := int(r.MTU())
+	const maxIPData = header.IPv4MinimumProcessableDatagramSize - header.IPv4MinimumSize
+	if mtu > maxIPData {
+		mtu = maxIPData
+	}
+	available := mtu - header.ICMPv4MinimumSize
+
+	if available < len(origIPHdr)+header.ICMPv4MinimumErrorPayloadSize {
+		return RuleDrop, 0
+	}
+
+	payloadLen := len(origIPHdr) + transportHeader.Size() + pkt.Data().Size()
+	if payloadLen > available {
+		payloadLen = available
+	}
+
+	newHeader := append(buffer.View(nil), origIPHdr...)
+	newHeader = append(newHeader, transportHeader...)
+	payload := newHeader.ToVectorisedView()
+	if dataCap := payloadLen - payload.Size(); dataCap > 0 {
+		payload.AppendView(pkt.Data().AsRange().Capped(dataCap).ToOwnedView())
+	} else {
+		payload.CapLength(payloadLen)
+	}
+
+	icmpPkt := NewPacketBuffer(PacketBufferOptions{
+		ReserveHeaderBytes: int(r.MaxHeaderLength()) + header.ICMPv4MinimumSize,
+		Data:               payload,
+	})
+
+	icmpPkt.TransportProtocolNumber = header.ICMPv4ProtocolNumber
+
+	icmpHdr := header.ICMPv4(icmpPkt.TransportHeader().Push(header.ICMPv4MinimumSize))
+	icmpHdr.SetCode(icmpCode)
+	icmpHdr.SetType(icmpType)
+	icmpHdr.SetPointer(0)
+	icmpHdr.SetChecksum(header.ICMPv4Checksum(icmpHdr, icmpPkt.Data().AsRange().Checksum()))
+
+	if err := r.WritePacket(
+		NetworkHeaderParams{
+			Protocol: header.ICMPv4ProtocolNumber,
+			TTL:      r.DefaultTTL(),
+			TOS:      DefaultTOS,
+		},
+		icmpPkt,
+	); err != nil {
+		return RuleDrop, 0
+	}
+
+	return RuleDrop, 0
 }
 
 // ReturnTarget returns from the current chain. If the chain is a built-in, the
