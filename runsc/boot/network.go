@@ -158,9 +158,10 @@ func (r *Route) toTcpipRoute(id tcpip.NICID) (tcpip.Route, error) {
 type Action string
 
 const (
-	Drop   Action = "drop"
-	Accept        = "accept"
-	Reject        = "reject"
+	Drop         Action = "drop"
+	Accept              = "accept"
+	Reject              = "reject"
+	RejectTCPRST        = "rejectTcpRST"
 )
 
 // ReplaceIPTableArg
@@ -267,6 +268,8 @@ func (n *Network) ReplaceIPTables(args *ReplaceIPTableArg, _ *struct{}) error {
 			target = &stack.AcceptTarget{NetworkProtocol: header.IPv4ProtocolNumber}
 		case Reject:
 			target = &stack.RejectICMPTarget{NetworkProtocol: header.IPv4ProtocolNumber}
+		case RejectTCPRST:
+			target = &stack.RejectTCPRSTTarget{NetworkProtocol: header.IPv4ProtocolNumber}
 		default:
 			return fmt.Errorf("not supported target %s", target)
 		}

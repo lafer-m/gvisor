@@ -21,6 +21,7 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/buffer"
 	"gvisor.dev/gvisor/pkg/tcpip/header"
+	"gvisor.dev/gvisor/pkg/tcpip/seqnum"
 )
 
 // AcceptTarget accepts packets.
@@ -94,17 +95,17 @@ func (rt *RejectICMPTarget) Action(pkt *PacketBuffer, hook Hook, r *Route, addre
 		return RuleDrop, 0
 	}
 
+	// only support ipv4
+	if pkt.NetworkProtocolNumber != header.IPv4ProtocolNumber {
+		return RuleDrop, 0
+	}
+
 	// return icmp port unreachable err
 	origIPHdr := header.IPv4(pkt.NetworkHeader().View())
 	origIPHdrSrc := origIPHdr.SourceAddress()
 	origIPHdrDst := origIPHdr.DestinationAddress()
 
 	if pkt.NetworkPacketInfo.LocalAddressBroadcast || header.IsV4MulticastAddress(origIPHdrDst) || origIPHdrSrc == header.IPv4Any {
-		return RuleDrop, 0
-	}
-
-	// only support ipv4
-	if pkt.NetworkProtocolNumber != header.IPv4ProtocolNumber {
 		return RuleDrop, 0
 	}
 
@@ -157,6 +158,93 @@ func (rt *RejectICMPTarget) Action(pkt *PacketBuffer, hook Hook, r *Route, addre
 		},
 		icmpPkt,
 	); err != nil {
+		return RuleDrop, 0
+	}
+
+	return RuleDrop, 0
+}
+
+// RejectICMPTarget return icmp port unreachable, only support ipv4
+type RejectTCPRSTTarget struct {
+	// NetworkProtocol is the network protocol the target is used with.
+	//
+	// Immutable.
+	NetworkProtocol tcpip.NetworkProtocolNumber
+}
+
+func (rt *RejectTCPRSTTarget) Action(pkt *PacketBuffer, hook Hook, r *Route, addressEP AddressableEndpoint) (RuleVerdict, int) {
+	// should return icmp err
+	if rt.NetworkProtocol != pkt.NetworkProtocolNumber {
+		// not support protocol
+		panic(fmt.Sprintf(
+			"RejectTCPRSTTarget.Action with NetworkProtocol %d called on packet with NetworkProtocolNumber %d",
+			rt.NetworkProtocol, pkt.NetworkProtocolNumber))
+	}
+
+	// just jrop without return icmp error
+	if r == nil {
+		return RuleDrop, 0
+	}
+
+	// only support ipv4
+	if pkt.NetworkProtocolNumber != header.IPv4ProtocolNumber {
+		return RuleDrop, 0
+	}
+
+	transportHeader := pkt.TransportHeader().View()
+	origTCPHdr := header.TCP(transportHeader)
+	origTCPHdrSrcPort := origTCPHdr.SourcePort()
+	origTCPHdrDstPort := origTCPHdr.DestinationPort()
+
+	tcpPkt := NewPacketBuffer(PacketBufferOptions{
+		ReserveHeaderBytes: int(r.MaxHeaderLength()) + header.TCPMinimumSize,
+		Data:               buffer.VectorisedView{},
+	})
+
+	seq := seqnum.Value(0)
+	ack := seqnum.Value(0)
+	flags := header.TCPFlagRst
+
+	if origTCPHdr.Flags().Contains(header.TCPFlagAck) {
+		// return without ack
+		seq = seqnum.Value(origTCPHdr.AckNumber())
+	} else {
+		// return with ack
+		flags |= header.TCPFlagAck
+		size := seqnum.Size(pkt.Data().Size())
+		if origTCPHdr.Flags().Contains(header.TCPFlagFin) || origTCPHdr.Flags().Contains(header.TCPFlagSyn) {
+			ack = seqnum.Value(origTCPHdr.SequenceNumber() + uint32(size) + 1)
+		} else {
+			ack = seqnum.Value(origTCPHdr.SequenceNumber() + uint32(size))
+		}
+
+	}
+
+	tcpPkt.TransportProtocolNumber = header.TCPProtocolNumber
+	tcpHdr := header.TCP(tcpPkt.TransportHeader().Push(header.TCPMinimumSize))
+	tcpHdr.Encode(&header.TCPFields{
+		SrcPort:    origTCPHdrDstPort,
+		DstPort:    origTCPHdrSrcPort,
+		SeqNum:     uint32(seq),
+		AckNum:     uint32(ack),
+		DataOffset: uint8(header.TCPMinimumSize),
+		Flags:      flags,
+	})
+
+	// not support gso checksum
+	xsum := r.PseudoHeaderChecksum(header.TCPProtocolNumber, uint16(tcpPkt.Size()))
+	xsum = header.ChecksumCombine(xsum, tcpPkt.Data().AsRange().Checksum())
+	tcpHdr.SetChecksum(^tcpHdr.CalculateChecksum(xsum))
+
+	if err := r.WritePacket(
+		NetworkHeaderParams{
+			Protocol: header.TCPProtocolNumber,
+			TTL:      r.DefaultTTL(),
+			TOS:      DefaultTOS,
+		},
+		tcpPkt,
+	); err != nil {
+		log.Warningf("write packet err : %v", err)
 		return RuleDrop, 0
 	}
 
